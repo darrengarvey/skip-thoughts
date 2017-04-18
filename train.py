@@ -2,6 +2,7 @@
 
 import argparse
 import itertools
+import os
 import sys
 from six.moves import shlex_quote
 
@@ -28,11 +29,20 @@ def parse_args(args):
                            'child: run workers as child processes')
   parser.add_argument('-g', '--use-gpus', type=str, default='0',
                      help='Use these GPU(s) if available (eg. "0,1,2,3", or "" (ie. none)')
+
+  # Extra args to pass to the runner script.
+  parser.add_argument('--eval-steps', type=int, required=True,
+                      help='Number of steps to run when evaluating')
+  parser.add_argument('--train-steps', type=int, required=True,
+                      help='Number of steps to train for')
+  parser.add_argument('--input-pattern', required=True,
+                      help='Location to read input data from')
   return parser.parse_args(args)
 
 
 class JobSpawner(object):
   def __init__(self, args):
+    self.args = args
     self.logdir = args.logdir
     self.session = args.session
     self.mode = args.mode
@@ -40,6 +50,7 @@ class JobSpawner(object):
     self.num_workers = args.num_workers
     self.tensorboard_port = args.starting_port
     self.port = args.starting_port + 1
+    self.use_gpus = args.use_gpus
     gpus = args.use_gpus.split(',')
     self.gpus = itertools.cycle(gpus if len(gpus) else [''])
     # The list of commands we'll want to run
@@ -50,7 +61,6 @@ class JobSpawner(object):
     self.host = '127.0.0.1'
     self.shell = 'bash'
 
-    self._create_cluster_spec()
     self._create_commands()
 
   def _create_cluster_spec(self):
@@ -84,23 +94,45 @@ class JobSpawner(object):
   
   def _create_commands(self):
     """Get a list of commands to run to invoke:
-       - master server
-       - parameter server(s)
-       - worker node(s)
        - tensorboard"""
-    base_cmd = [
-        sys.executable, self.runner_script,
-        '--logdir', self.logdir,
-        '--master', self.cluster['master'],
-        '--ps-hosts', ','.join(self.cluster['ps']),
-        '--worker-hosts', ','.join(self.cluster['worker']),
-    ]
-  
     # None of these need the GPU.
     self._new_cmd(
         'tb', ['tensorboard', '--logdir', self.logdir, '--port', self.tensorboard_port])
     if self.mode == 'tmux':
       self._new_cmd('htop', ['htop'])
+
+    runner_cmd = [
+        sys.executable, self.runner_script,
+        '--logdir', self.logdir,
+        '--input-pattern', self.args.input_pattern,
+        '--train-steps', self.args.train_steps,
+        '--eval-steps', self.args.eval_steps,
+    ]
+    if self.num_workers > 1:
+      self._create_cluster_spec()
+      self._create_distributed_run_commands(runner_cmd)
+    else:
+      self._create_local_run_commands(runner_cmd)
+    self._create_helper_commands()
+
+  def _create_local_run_commands(self, runner_cmd):
+    """Just running a single, non-distributed run. In this case
+       there's no point starting a master or parameter server(s)."""
+    self._new_cmd('worker',
+        ['CUDA_VISIBLE_DEVICES={}'.format(self.use_gpus)] + runner_cmd + [
+        '--environment', 'local',
+    ])
+
+  def _create_distributed_run_commands(self, runner_cmd):
+    """Commands needed to run in distributed mode, with:
+       - master server
+       - parameter server(s)
+       - worker node(s)"""
+    base_cmd = runner_cmd + [
+        '--master', self.cluster['master'],
+        '--ps-hosts', ','.join(self.cluster['ps']),
+        '--worker-hosts', ','.join(self.cluster['worker']),
+    ]
   
     # Keep track of the current task index into the cluster spec.
     index = 0
@@ -120,6 +152,8 @@ class JobSpawner(object):
           ['CUDA_VISIBLE_DEVICES={}'.format(self.gpus.next())] + base_cmd +
           ['--task-name', 'worker', '--task-index', index])
   
+  def _create_helper_commands(self):
+    """Some helper scripts to tear down the job."""
     notes = []
     cmds = [
         'mkdir -p {}'.format(self.logdir),

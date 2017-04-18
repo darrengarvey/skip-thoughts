@@ -17,7 +17,7 @@ def read_vocab(vocab):
 def get_input(pattern, features):
     examples = tf.contrib.learn.io.read_keyed_batch_features(
         pattern,
-        batch_size=1,
+        batch_size=2,
         features=features,
         reader=tf.TFRecordReader)
     return examples
@@ -57,12 +57,22 @@ def decode_sentence(tensor, vocab):
         words.append(vocab[val])
     return ' '.join(words)
 
+def get_sequence_lengths(tensor):
+    # There's got to be a cleaner way to get the sequence lengths...
+    _, _, counts = tf.unique_with_counts(tensor.indices[:,0])
+    return counts.eval()
+
 def print_decode(examples, name, vocab):
     print ('{} (len={}): {}'.format(
-        name, len(examples[name].values),
+        name, get_sequence_lengths(examples[name]),
         decode_sentence(examples[name], vocab)))
 
-with tf.train.SingularMonitoredSession() as sess:
+with tf.Session() as sess:
+    tf.global_variables_initializer().run()
+
+    # Start the queue runners.
+    coord = tf.train.Coordinator()
+    threads = tf.train.start_queue_runners(coord=coord)
     while True:
         files, examples = sess.run(i)
         print ('files: {}'.format(', '.join(files)))

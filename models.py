@@ -45,7 +45,7 @@ class SkipThoughtsModel(util.Model):
     }
     self.feature_spec = self.features
 
-  def _get_input(self, pattern):
+  def _get_input(self, pattern, name=None):
     """Read, parse and batch tf.Examples in multiple threads and push them onto
        a queue."""
     # Ignore the returned file names for now.
@@ -53,7 +53,8 @@ class SkipThoughtsModel(util.Model):
         pattern,
         batch_size=self.batch_size,
         features=self.feature_spec,
-        reader=tf.TFRecordReader)
+        reader=tf.TFRecordReader,
+        name=name)
 
     def _sparse_to_batch(sparse):
       ids = tf.sparse_tensor_to_dense(sparse)
@@ -76,10 +77,10 @@ class SkipThoughtsModel(util.Model):
     return features, targets
 
   def get_training_input(self):
-    return self._get_input(self.input_pattern)
+    return self._get_input(self.input_pattern, 'training_input')
 
   def get_eval_input(self):
-    return self._get_input(self.validation_input_pattern)
+    return self._get_input(self.validation_input_pattern, 'eval_input')
 
   def _get_sequence_lengths(self, tensor):
     if isinstance(tensor, tf.SparseTensor):
@@ -90,26 +91,35 @@ class SkipThoughtsModel(util.Model):
 
   def get_predictions(self, features, targets, mode, params):
     """Build and return the model."""
+    encode_input = features['encode']
+    decode_pre_input = targets['decode_pre']
+    decode_post_input = targets['decode_post']
+    tf.summary.histogram('inputs/encode', encode_input)
+    tf.summary.histogram('inputs/decode_pre', decode_pre_input)
+    tf.summary.histogram('inputs/decode_post', decode_post_input)
+
     # Share the word embedding between encoder and decoder.
     word_emb = tf.get_variable(
         'word_embedding',
         shape=[self.vocab_size, params['embedding_dim']],
         initializer=self.uniform_initializer)
-    encode_input = tf.nn.embedding_lookup(word_emb, features['encode'])
-    encode_lengths = tf.to_int32(self._get_sequence_lengths(features['encode']), name='length')
+    tf.summary.histogram('word_embedding', word_emb)
+
+    encode_emb = tf.nn.embedding_lookup(word_emb, encode_input)
+    encode_lengths = tf.to_int32(self._get_sequence_lengths(encode_input), name='length')
     # Now encode a thought vector and feed it into the two decoders.
-    thought_vector = self._setup_encoder(encode_input, encode_lengths)
+    thought_vector = self._setup_encoder(encode_emb, encode_lengths)
 
     # When training, feed the thought vector into two separate
     # networks: predicting the previous and next sentences
-    decode_pre_input = tf.nn.embedding_lookup(word_emb, targets['decode_pre'])
+    decode_pre_input = tf.nn.embedding_lookup(word_emb, decode_pre_input)
     decode_pre_mask = targets['decode_pre_mask']
     decode_pre_lengths = self._get_sequence_lengths(decode_pre_mask)
     decode_pre = self._setup_decoder(
         'decode_pre', thought_vector,
         decode_pre_input, decode_pre_lengths,
         reuse=False)
-    decode_post_input = tf.nn.embedding_lookup(word_emb, targets['decode_post'])
+    decode_post_input = tf.nn.embedding_lookup(word_emb, decode_post_input)
     decode_post_mask = targets['decode_post_mask']
     decode_post_lengths = self._get_sequence_lengths(decode_post_mask)
     decode_post = self._setup_decoder(
@@ -149,6 +159,7 @@ class SkipThoughtsModel(util.Model):
           sequence_length=sequence_lengths,
           initial_state=initial_state,
           scope=scope)
+    tf.summary.histogram('rnn/'+name, decoder_output)
 
     # Stack batch vertically.
     decoder_output = tf.reshape(decoder_output, [-1, num_units])
@@ -161,7 +172,8 @@ class SkipThoughtsModel(util.Model):
           activation_fn=None,
           weights_initializer=self.uniform_initializer,
           scope=scope)
-      return logits
+    tf.summary.histogram('logits/'+name, logits)
+    return logits
 
   def _decoder_loss(self, name, logits, mask, targets):
     targets = tf.reshape(targets, [-1])
@@ -195,6 +207,8 @@ class SkipThoughtsModel(util.Model):
             sequence_length=sequence_lengths,
             dtype=tf.float32,
             scope=scope)
+        for i, state in enumerate(states):
+          tf.summary.histogram('rnn/state_{}'.format(i), state)
         thought_vectors = tf.concat(states, 1, name='thought_vectors')
       else:
         cell = self._get_cell(self.params['encoder_dim'])
@@ -205,4 +219,5 @@ class SkipThoughtsModel(util.Model):
             dtype=tf.float32,
             scope=scope)
         thought_vectors = tf.identity(state, name='thought_vectors')
+    tf.summary.histogram('thought_vectors', thought_vectors)
     return thought_vectors

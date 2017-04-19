@@ -21,11 +21,15 @@ directly.
 def parse_args(args):
   parser = util.get_arg_parser()
   # Add additional command line stuff here...
-  parser.add_argument('--input-pattern', required=True,
+  parser.add_argument('-i', '--input-pattern', required=True,
                       help='Location to read input data from')
+  parser.add_argument('-v', '--validation-input-pattern', required=True,
+                      help='Location to read validation input data from')
   parser.add_argument('--bidirectional', action='store_true', default=False,
                       help='Use a bidiredctional RNN')
-  parser.add_argument('--embedding-dim', default=2400, type=int,
+  parser.add_argument('--embedding-dim', default=620, type=int,
+                      help='Word embedding dimension (default=%(default)s)')
+  parser.add_argument('--encoder-dim', default=2400, type=int,
                       help='Number of units in the RNNCell (default=%(default)s)')
   parser.add_argument('--vocab', required=True, type=str,
                       help='Path to the vocab file used to encode the input')

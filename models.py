@@ -1,6 +1,8 @@
 import tensorflow as tf
+import tensorflow.contrib.layers as layers
 from tensorflow.contrib.learn.python.learn.estimators.state_saving_rnn_estimator import StateSavingRnnEstimator
 import util
+from gru_cell import LayerNormGRUCell
 
 
 def random_orthonormal_initializer(shape, dtype=tf.float32,
@@ -19,56 +21,121 @@ class SkipThoughtsModel(util.Model):
         minval=-self.uniform_init_scale,
         maxval=self.uniform_init_scale)
 
+    with open(args.vocab, 'r') as f:
+        self.vocab = [l.strip() for l in f]
+    # Set up input parsing stuff via tf.contrib.learn...
+    self.vocab_size = len(self.vocab)
+    encode = layers.sparse_column_with_integerized_feature(
+        'encode', bucket_size=self.vocab_size)
+    decode_pre = layers.sparse_column_with_integerized_feature(
+        'decode_pre', bucket_size=self.vocab_size)
+    decode_post = layers.sparse_column_with_integerized_feature(
+        'decode_post', bucket_size=self.vocab_size)
+    self.features = {
+        'encode': layers.embedding_column(encode, dimension=100),
+        'decode_pre': layers.embedding_column(decode_pre, dimension=100),
+        'decode_post': layers.embedding_column(decode_post, dimension=100),
+    }
+    self.feature_spec = tf.contrib.layers.create_feature_spec_for_parsing(self.features),
+    # ... or do it the easy way:
+    self.features = {
+        "encode": tf.VarLenFeature(dtype=tf.int64),
+        "decode_pre": tf.VarLenFeature(dtype=tf.int64),
+        "decode_post": tf.VarLenFeature(dtype=tf.int64),
+    }
+    self.feature_spec = self.features
+
+  def _get_input(self, pattern):
+    """Read, parse and batch tf.Examples in multiple threads and push them onto
+       a queue."""
+    # Ignore the returned file names for now.
+    _, examples = tf.contrib.learn.io.read_keyed_batch_features(
+        pattern,
+        batch_size=self.batch_size,
+        features=self.feature_spec,
+        reader=tf.TFRecordReader)
+
+    features = {
+        'encode': examples['encode'],
+    }
+    targets = {
+        'decode_pre': examples['decode_pre'],
+        'decode_post': examples['decode_post'],
+    }
+    return features, targets
+
+  def get_training_input(self):
+    return self._get_input(self.input_pattern)
+
+  def get_eval_input(self):
+    return self._get_input('validation.tfrecords')
+
+  def _get_sequence_lengths(self, tensor):
+    _, _, counts = tf.unique_with_counts(tensor.indices[:,0])
+    return counts
+
   def get_predictions(self, features, targets, mode, params):
     """Build and return the model."""
-    # decode_pre_emb, decode_pre_mask, decode_pre_targets
-    # decode_post_emb, decode_post_mask, decode_post_targets
-    encode_input, encode_mask = self._setup_input()
-    thought_vector = self._setup_encoder(encode_input, encode_mask)
+    # Share the word embedding between encoder and decoder.
+    word_emb = tf.get_variable(
+        'word_embedding',
+        shape=[self.vocab_size, params['embedding_dim']],
+        initializer=self.uniform_initializer)
+    encode_input = tf.nn.embedding_lookup_sparse(
+        word_emb, features['encode'], None)
+    encode_lengths = self._get_sequence_lengths(features['encode'])
+    # Now encode a thought vector and feed it into the two decoders.
+    thought_vector = self._setup_encoder(encode_input, encode_lengths)
+
     if mode != tf.contrib.learn.ModeKeys.TRAIN:
       # When training, feed the thought vector into two separate
       # networks: predicting the previous and next sentences
-      decoder_pre = self._setup_decoder(
-          'decoder_pre', thought_vector,
-          decode_pre_emb, decode_pre_mask,
+      decode_pre_input = tf.nn.embedding_lookup(word_emb, targets['decode_pre'])
+      decode_pre_lengths = self._get_sequence_lengths(targets['decode_pre'])
+      decode_pre = self._setup_decoder(
+          'decode_pre', thought_vector,
+          decode_pre_input, decode_pre_lengths,
           reuse=False)
-      decoder_post = self._setup_decoder(
-          'decoder_post', thought_vector,
-          decode_post_emb, decode_post_mask,
+      decode_post_input = tf.nn.embedding_lookup(word_emb, targets['decode_post'])
+      decode_post_lengths = self._get_sequence_lengths(targets['decode_post'])
+      decode_post = self._setup_decoder(
+          'decode_post', thought_vector,
+          decode_post_input, decode_post_lengths,
           reuse=True)
       return {
-          'decoder_pre_logits': decoder_pre[0],
-          'decoder_pre_mask': decoder_pre[1],
-          'decoder_post_logits': decoder_post[0],
-          'decoder_post_mask': decoder_post[1],
+          'decode_pre_logits': decode_pre,
+          'decode_pre_lengths': decode_pre_lengths,
+          'decode_post_logits': decode_post,
+          'decode_post_lengths': decode_post_lengths,
       }, {
-          'decoder_pre_targets': decoder_pre_targets,
-          'decoder_post_targets': decode_post_targets,
+          'decode_pre_targets': targets['decode_pre'],
+          'decode_post_targets': targets['decode_post'],
       }
 
   def get_loss(self, predictions, targets, mode, params):
     if mode == tf.contrib.learn.ModeKeys.TRAIN:
-      decoder_pre_loss = self._decoder_loss(
-          'decoder_pre', predictions['decoder_pre_logits'],
-          predictions['decoder_pre_mask'], targets['decoder_pre_targets'])
-      decoder_post_loss = self._decoder_loss(
-          'decoder_post', predictions['decoder_post_logits'],
-          predictions['decoder_post_mask'], targets['decoder_post_targets'])
-      total_loss = decoder_pre_loss + decoder_post_loss
+      decode_pre_loss = self._decoder_loss(
+          'decode_pre', predictions['decode_pre_logits'],
+          predictions['decode_pre_mask'], targets['decode_pre_targets'])
+      decode_post_loss = self._decoder_loss(
+          'decode_post', predictions['decode_post_logits'],
+          predictions['decode_post_mask'], targets['decode_post_targets'])
+      total_loss = decode_pre_loss + decode_post_loss
       tf.summary.scalar('losses/total', total_loss)
       return total_loss
+    else:
+      raise Exception("Wrong mode {}".format(mode))
  
-  def _setup_decoder(self, name, initial_state, embeddings, mask, reuse):
+  def _setup_decoder(self, name, initial_state, embeddings, sequence_lengths, reuse):
     num_units = self.params['encoder_dim']
     cell = self._get_cell(num_units)
     with tf.variable_scope(name) as scope:
       decoder_input = tf.pad(
           embeddings[:, :-1. :], [[0, 0], [1, 0], [0, 0]], name='input')
-      length = tf.reduce_sum(mask, 1, name='length')
       decoder_output, _ = tf.nn.dynamic_rnn(
           cell=cell,
           inputs=decoder_input,
-          sequence_length=length,
+          sequence_length=sequence_lengths,
           initial_state=initial_state,
           scope=scope)
 
@@ -83,7 +150,7 @@ class SkipThoughtsModel(util.Model):
           activation_fn=None,
           weights_initializer=self.uniform_initializer,
           scope=scope)
-      return logits, mask
+      return logits
 
   def _decoder_loss(self, name, logits, mask, targets):
     targets = tf.reshape(targets, [-1])
@@ -103,43 +170,28 @@ class SkipThoughtsModel(util.Model):
     # TODO: Add AttentionWrapper, DropoutWrapper, etc.
     return cell
 
-  def _setup_encoder(self, inputs, encode_mask):
+  def _setup_encoder(self, inputs, sequence_lengths):
     with tf.variable_scope('encoder') as scope:
-      length = tf.to_int32(tf.reduce_sum(encode_mask, 1), name='length')
-      if self.params['bidirectional_decoder']:
-        num_units = self.params['encoder_dim'] // 2
+      if self.params['bidirectional']:
+        print('bidirectional')
+        num_units = self.params['embedding_dim'] // 2
         cell_fw = self._get_cell(num_units)
         cell_bw = self._get_cell(num_units)
         _, states = tf.nn.bidirectional_dynamic_rnn(
             cell_fw=cell_fw,
             cell_bw=cell_bw,
             inputs=inputs,
-            sequence_length=length,
+            sequence_length=sequence_lengths,
             dtype=tf.float32,
             scope=scope)
         thought_vectors = tf.concat(states, 1, name='thought_vectors')
       else:
-        cell = self._get_cell(self.params['encoder_dim'])
+        cell = self._get_cell(self.params['embedding_dim'])
         _, state = tf.nn.dynamic_rnn(
             cell=cell,
             inputs=inputs,
-            sequence_length=length,
+            sequence_length=sequence_lengths,
             dtype=tf.float32,
             scope=scope)
         thought_vectors = tf.identity(state, name='thought_vectors')
     return thought_vectors
-
-  def _get_input(self, filename):
-    pass
-
-  def get_training_input(self):
-    return self._get_input('train.tfrecords')
-
-  def get_eval_input(self):
-    return self._get_input('validation.tfrecords')
-
-  def get_predictions(self, features, targets, mode, params):
-    pass
-
-  def get_loss(self, predictions, targets, mode, params):
-    pass

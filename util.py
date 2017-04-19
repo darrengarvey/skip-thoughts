@@ -1,4 +1,6 @@
 import argparse
+import json
+import os
 import tensorflow as tf
 from tensorflow.contrib.learn.python.learn import learn_runner
 from tensorflow.contrib.learn.python.learn.estimators.run_config import RunConfig
@@ -18,7 +20,7 @@ def get_arg_parser():
                       help='Turn on debug logging')
   ###################################################################
   # Distributed running arguments
-  parser.add_argument('--environment', default='cloud',
+  parser.add_argument('--environment', default='local',
                       choices=['cloud', 'local'],
                       metavar=['cloud', 'local'],
                       help='Whether to run locally or in a cloud setting.')
@@ -55,19 +57,32 @@ def parse_args(parser, args):
     tf.logging.set_verbosity(tf.logging.INFO)
 
   if args.ps_hosts != '':
-      os.environ['TF_CONFIG'] = json.dumps({
-        'master': args.master,
-        'environment': args.environment,
-        'cluster': {
-          'master': [args.master],
-          'ps': args.ps_hosts.split(','),
-          'worker': args.worker_hosts.split(','),
-        },
-        'task': {
-          'type': args.task_name,
-          'index': args.task_index,
-        }
-      })
+    print('Setting up for distributed training')
+    os.environ['TF_CONFIG'] = json.dumps({
+      'master': args.master,
+      'environment': args.environment,
+      'cluster': {
+        'master': [args.master],
+        'ps': args.ps_hosts.split(','),
+        'worker': args.worker_hosts.split(','),
+      },
+      'task': {
+        'type': args.task_name,
+        'index': args.task_index,
+      }
+    })
+  else:
+    print('Setting up for local training')
+    os.environ['TF_CONFIG'] = json.dumps({
+      'master': 'grpc://127.0.0.1:2222',
+      'cluster': {
+        'local': ['localhost:2222'],
+      },
+      'task': {
+        'index': 0,
+      }
+    })
+
   run_config = RunConfig()
   return args, run_config
 
@@ -92,8 +107,13 @@ def _create_experiment(args, model):
 
 def run(args, model):
   """Run a tf.learn.Experiment, possibly distributed."""
+  # This is pretty ugly, but we need to set the schedule to this magic
+  # string as the default learn_runner figures out is wrong. It's not
+  # so easy to fix there either. Meh...
+  schedule = 'local_run' if args.environment == 'local' else None
   learn_runner.run(_create_experiment(args, model),
-                   args.logdir)
+                   args.logdir,
+                   schedule=schedule)
 
 
 class Model(object):

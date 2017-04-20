@@ -39,6 +39,8 @@ def get_arg_parser():
   ###################################################################
   parser.add_argument('--logdir', required=True,
                       help='Location to store checkpoint / log data')
+  parser.add_argument('--jit', action='store_true', default=False,
+                      help='Use XLA to compile the graph (experimental)')
   parser.add_argument('--eval-steps', type=int, required=True,
                       help='Number of steps to run when evaluating')
   parser.add_argument('--train-steps', type=int, required=True,
@@ -107,6 +109,14 @@ def _create_experiment(args, model):
 
 def run(args, model):
   """Run a tf.learn.Experiment, possibly distributed."""
+  if args.jit:
+      jit_scope = tf.contrib.compiler.jit.experimental_jit_scope
+      with jit_scope():
+          _run(args, model)
+  else:
+      _run(args, model)
+
+def _run(args, model):
   # This is pretty ugly, but we need to set the schedule to this magic
   # string as the default learn_runner figures out is wrong. It's not
   # so easy to fix there either. Meh...

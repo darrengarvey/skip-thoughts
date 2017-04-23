@@ -1,6 +1,5 @@
 import tensorflow as tf
 import tensorflow.contrib.layers as layers
-from tensorflow.contrib.learn.python.learn.estimators.state_saving_rnn_estimator import StateSavingRnnEstimator
 import util
 from gru_cell import LayerNormGRUCell
 
@@ -49,11 +48,11 @@ class SkipThoughtsModel(util.Model):
     """Read, parse and batch tf.Examples in multiple threads and push them onto
        a queue."""
     # Ignore the returned file names for now.
-    _, examples = tf.contrib.learn.io.read_keyed_batch_features(
-        pattern,
+    examples = tf.contrib.learn.io.read_batch_record_features(
+        file_pattern=pattern,
         batch_size=self.batch_size,
         features=self.feature_spec,
-        reader=tf.TFRecordReader,
+        reader_num_threads=2, # one thread can't keep up with >1 GPUs
         name=name)
 
     def _sparse_to_batch(sparse):

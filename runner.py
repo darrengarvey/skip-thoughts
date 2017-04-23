@@ -35,10 +35,6 @@ def parse_args(args):
                       help='Path to the vocab file used to encode the input')
   parser.add_argument('--batch-size', default=128, type=int,
                       help='Batch size (default=%(default)s)')
-  parser.add_argument('--learning-rate', default=0.002, type=float,
-                      help='Learning rate (default=%(default)s)')
-  parser.add_argument('--optimizer', default='Adam', type=str,
-                      help='Optimizer to use (default=%(default)s)')
   parser.add_argument('--uniform-init-scale', default=0.1, type=float,
                       help='Scale to use for random_uniform_initializer '
                            '(default=%(default)s)')
@@ -48,8 +44,7 @@ def parse_args(args):
 def main(args):
   args, run_config = parse_args(args)
   model = SkipThoughtsModel(args)
-  print ('Task index: %d' % args.task_index)
-  util.run(args, model)
+  util.run(args, run_config, model)
 
 
 if __name__ == '__main__':

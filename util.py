@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import tensorflow as tf
+from tensorflow.contrib.layers.python.layers import optimizers
 from tensorflow.contrib.learn.python.learn import learn_runner
 from tensorflow.contrib.learn.python.learn.estimators.run_config import RunConfig
 
@@ -39,12 +40,16 @@ def get_arg_parser():
   ###################################################################
   parser.add_argument('--logdir', required=True,
                       help='Location to store checkpoint / log data')
+  parser.add_argument('--optimizer', default='Adam', type=str,
+                      help='Optimizer to use (default=%(default)s)')
   parser.add_argument('--jit', action='store_true', default=False,
                       help='Use XLA to compile the graph (experimental)')
   parser.add_argument('--eval-steps', type=int, required=True,
                       help='Number of steps to run when evaluating')
   parser.add_argument('--train-steps', type=int, required=True,
                       help='Number of steps to train for')
+  parser.add_argument('--learning-rate', default=0.002, type=float,
+                      help='Learning rate (default=%(default)s)')
   return parser
 
 

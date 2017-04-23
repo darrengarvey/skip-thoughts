@@ -53,8 +53,15 @@ def get_arg_parser():
                      'running evaluation')
   parser.add_argument('--train-steps', type=int, required=True,
                       help='Number of steps to train for')
+  parser.add_argument('--clip-gradients', default=5.0, type=float,
+                      help='Clip gradients over this value (default=%(default)s)')
   parser.add_argument('--learning-rate', default=0.002, type=float,
                       help='Learning rate (default=%(default)s)')
+  parser.add_argument('--learning-rate-decay-rate', default=0.5, type=float,
+                      help='Learning rate decay control (default=%(default)s)')
+  parser.add_argument('--learning-rate-decay-steps', default=50000, type=int,
+                      help='How often to decay the learning rate '
+                           '(default=%(default)s)')
   return parser
 
 
@@ -186,10 +193,24 @@ class Model(object):
     raise NotImplementedError("get_loss not implemented")
 
   def get_train_op(self, loss, params):
+    learning_rate_decay_fn = None
+    if self.learning_rate_decay_rate > 0:
+      def learning_rate_decay(lr, global_step):
+        return tf.train.exponential_decay(
+            learning_rate=self.learning_rate,
+            global_step=global_step,
+            decay_rate=self.learning_rate_decay_rate,
+            decay_steps=self.learning_rate_decay_steps,
+            staircase=False)
+      learning_rate_decay_fn = learning_rate_decay
+    else:
+      learning_rate_decay_fn = None
     return tf.contrib.layers.optimize_loss(
         loss=loss,
         global_step=tf.contrib.framework.get_global_step(),
+        clip_gradients=self.clip_gradients,
         learning_rate=self.learning_rate,
+        learning_rate_decay_fn=learning_rate_decay_fn,
         summaries=optimizers.OPTIMIZER_SUMMARIES,
         optimizer=self.optimizer)
 

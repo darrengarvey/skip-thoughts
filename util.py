@@ -46,6 +46,11 @@ def get_arg_parser():
                       help='Use XLA to compile the graph (experimental)')
   parser.add_argument('--eval-steps', type=int, required=True,
                       help='Number of steps to run when evaluating')
+  parser.add_argument('--min_eval_frequency', default=1000, type=int,
+                      help='Min number of steps between eval steps. '
+                     'Evaluation runs on the CPU (if you use train.py) '
+                     'and the GPU can get starved if the CPU is busy '
+                     'running evaluation')
   parser.add_argument('--train-steps', type=int, required=True,
                       help='Number of steps to train for')
   parser.add_argument('--learning-rate', default=0.002, type=float,
@@ -91,6 +96,8 @@ def parse_args(parser, args):
     })
 
   run_config = RunConfig()
+
+  run_config = RunConfig(model_dir=args.logdir)
   return args, run_config
 
 
@@ -100,7 +107,7 @@ def _create_experiment(args, model):
   Args:
       args: Parsed command line from calling `parse_args()`.
       model: An instance of `Model`."""
-  def experiment_fn(output_dir):
+  def experiment_fn(run_config, hparams):
     estimator = model.get_estimator()
     return tf.contrib.learn.Experiment(
         estimator=estimator,
@@ -108,26 +115,27 @@ def _create_experiment(args, model):
         eval_input_fn=model.get_eval_input,
         train_steps=args.train_steps,
         train_monitors=model.get_hooks(),
-        eval_steps=args.eval_steps)
+        eval_steps=args.eval_steps,
+        min_eval_frequency=args.min_eval_frequency)
   return experiment_fn
 
 
-def run(args, model):
+def run(args, run_config, model):
   """Run a tf.learn.Experiment, possibly distributed."""
   if args.jit:
       jit_scope = tf.contrib.compiler.jit.experimental_jit_scope
       with jit_scope():
-          _run(args, model)
+          _run(args, run_config, model)
   else:
-      _run(args, model)
+      _run(args, run_config, model)
 
-def _run(args, model):
+def _run(args, run_config, model):
   # This is pretty ugly, but we need to set the schedule to this magic
   # string as the default learn_runner figures out is wrong. It's not
   # so easy to fix there either. Meh...
   schedule = 'local_run' if args.environment == 'local' else None
   learn_runner.run(_create_experiment(args, model),
-                   args.logdir,
+                   run_config=run_config,
                    schedule=schedule)
 
 
@@ -181,7 +189,8 @@ class Model(object):
     return tf.contrib.layers.optimize_loss(
         loss=loss,
         global_step=tf.contrib.framework.get_global_step(),
-        learning_rate=params['learning_rate'],
+        learning_rate=self.learning_rate,
+        summaries=optimizers.OPTIMIZER_SUMMARIES,
         optimizer=self.optimizer)
 
   def get_model(self, features, targets, mode, params):
@@ -190,10 +199,15 @@ class Model(object):
   
        https://www.tensorflow.org/extend/estimators#constructing_the_model_fn"""
     predictions = self.get_predictions(features, targets, mode, params)
-    loss = self.get_loss(predictions, targets, mode, params)
-    train_op = self.get_train_op(loss, params)
-    eval_metric_ops = self.get_eval_metrics(features, predictions, targets,
-                                            mode, params)
+    if mode == tf.contrib.learn.ModeKeys.INFER:
+      loss = None
+      train_op = None
+      eval_metric_ops = None
+    else:
+      loss = self.get_loss(predictions, targets, mode, params)
+      train_op = self.get_train_op(loss, params)
+      eval_metric_ops = self.get_eval_metrics(features, predictions, targets,
+                                              mode, params)
     return tf.contrib.learn.ModelFnOps(mode, predictions, loss, train_op,
                                        eval_metric_ops)
  

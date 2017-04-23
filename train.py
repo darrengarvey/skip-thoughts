@@ -29,20 +29,13 @@ def parse_args(args):
                            'child: run workers as child processes')
   parser.add_argument('-g', '--use-gpus', type=str, default='0',
                      help='Use these GPU(s) if available (eg. "0,1,2,3", or "" (ie. none)')
-
-  # Extra args to pass to the runner script.
-  parser.add_argument('--eval-steps', type=int, required=True,
-                      help='Number of steps to run when evaluating')
-  parser.add_argument('--train-steps', type=int, required=True,
-                      help='Number of steps to train for')
-  parser.add_argument('--input-pattern', required=True,
-                      help='Location to read input data from')
-  return parser.parse_args(args)
+  return parser.parse_known_args(args)
 
 
 class JobSpawner(object):
-  def __init__(self, args):
+  def __init__(self, args, other_args):
     self.args = args
+    self.other_args = other_args
     self.logdir = args.logdir
     self.session = args.session
     self.mode = args.mode
@@ -100,14 +93,14 @@ class JobSpawner(object):
         'tb', ['tensorboard', '--logdir', self.logdir, '--port', self.tensorboard_port])
     if self.mode == 'tmux':
       self._new_cmd('htop', ['htop'])
+      self._new_cmd('nvidia-smi', ['watch', '-n', '1', 'nvidia-smi'])
 
     runner_cmd = [
         sys.executable, self.runner_script,
         '--logdir', self.logdir,
-        '--input-pattern', self.args.input_pattern,
-        '--train-steps', self.args.train_steps,
-        '--eval-steps', self.args.eval_steps,
     ]
+    runner_cmd += self.other_args
+
     if self.num_workers > 1:
       self._create_cluster_spec()
       self._create_distributed_run_commands(runner_cmd)
@@ -129,28 +122,29 @@ class JobSpawner(object):
        - parameter server(s)
        - worker node(s)"""
     base_cmd = runner_cmd + [
+        '--environment', 'cloud',
         '--master', self.cluster['master'],
         '--ps-hosts', ','.join(self.cluster['ps']),
         '--worker-hosts', ','.join(self.cluster['worker']),
     ]
   
-    # Keep track of the current task index into the cluster spec.
-    index = 0
+    # Evaluation is run on the master. We don't give it access to the GPU
+    # because each process that has a GPU takes all the memory, but the
+    # downside is it uses multi-threaded CPU ops, which work quite hard and can
+    # starve the GPUs by using up all CPU. So, just run it a bit nice, like...
     self._new_cmd('master',
-        ['CUDA_VISIBLE_DEVICES='] + base_cmd + ['--task-name', 'master',
-                                                '--task-index', index])
+        ['CUDA_VISIBLE_DEVICES=', 'nice'] + base_cmd + ['--task-name', 'master',
+                                                '--task-index', '0'])
     for i in range(self.num_ps):
-      index += 1
       self._new_cmd('ps',
           ['CUDA_VISIBLE_DEVICES='] + base_cmd + ['--task-name', 'ps',
-                                                  '--task-index', index])
+                                                  '--task-index', i])
 
     # Now set up the workers with GPU access. 
     for i in range(self.num_workers):
-      index += 1
       self._new_cmd('w-%d' % i,
           ['CUDA_VISIBLE_DEVICES={}'.format(self.gpus.next())] + base_cmd +
-          ['--task-name', 'worker', '--task-index', index])
+          ['--task-name', 'worker', '--task-index', i])
   
   def _create_helper_commands(self):
     """Some helper scripts to tear down the job."""
@@ -200,13 +194,13 @@ class JobSpawner(object):
 
 
 def main(args):
-  args = parse_args(args)
+  args, other_args = parse_args(args)
   if args.dry_run:
     print('Dry-run mode due to -n flag, otherwise the following '
           'commands would be executed:')
   else:
     print('Executing the following commands:')
-  runner = JobSpawner(args)
+  runner = JobSpawner(args, other_args)
   runner.print_commands()
   if not args.dry_run:
     if args.mode == 'tmux':

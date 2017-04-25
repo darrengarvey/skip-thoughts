@@ -5,7 +5,9 @@ import tensorflow as tf
 from tensorflow.contrib.layers.python.layers import optimizers
 from tensorflow.contrib.learn.python.learn import learn_runner
 from tensorflow.contrib.learn.python.learn.estimators.run_config import RunConfig
-
+from tensorflow.contrib.learn.python.learn.utils.saved_model_export_utils import make_export_strategy
+from tensorflow.python.estimator.export.export_lib import build_raw_serving_input_receiver_fn
+from tensorflow.python.estimator.export.export_lib import build_parsing_serving_input_receiver_fn
 
 """
 Code that you shouldn't have to care about too much. If tf.learn changes
@@ -124,6 +126,14 @@ def _create_experiment(args, model):
       model: An instance of `Model`."""
   def experiment_fn(run_config, hparams):
     estimator = model.get_estimator()
+    if hasattr(model, 'get_serving_input'):
+      # What an ugly function name...
+      print ('Setting up for export')
+      serving_input_fn = build_raw_serving_input_receiver_fn(
+          model.get_serving_input)
+      export_strategy = make_export_strategy(serving_input_fn)
+    else:
+      export_strategy = None
     return tf.contrib.learn.Experiment(
         estimator=estimator,
         train_input_fn=model.get_training_input,

@@ -45,6 +45,10 @@ def main(args):
   args, run_config = parse_args(args)
   model = SkipThoughtsModel(args)
   util.run(args, run_config, model)
+  #serving_input_fn = build_parsing_serving_input_receiver_fn(
+  #    model.get_serving_input())
+  #model.get_estimator().export_savedmodel(
+  #  args.logdir+'/export', serving_input_fn)
 
 
 if __name__ == '__main__':

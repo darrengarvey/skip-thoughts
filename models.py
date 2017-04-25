@@ -87,6 +87,11 @@ class SkipThoughtsModel(util.Model):
     return self._get_input(self.predict_input_pattern, 'predict_input',
                            num_epochs=1, shuffle=False)
 
+  def get_serving_input(self):
+    # TODO: Return placeholders for input at serving time
+    return {
+        'encode': tf.VarLenFeature(dtype=tf.int64),
+    }
   def _get_sequence_lengths(self, tensor):
     if isinstance(tensor, tf.SparseTensor):
       _, _, counts = tf.unique_with_counts(tensor.indices[:,0])

@@ -247,3 +247,87 @@ class SkipThoughtsModel(util.Model):
         thought_vectors = tf.identity(state, name='thought_vectors')
     tf.summary.histogram('thought_vectors', thought_vectors)
     return thought_vectors
+
+
+class SkipThoughtsPolarityClassifierModel(SkipThoughtsModel):
+  def __init__(self, args):
+    super(SkipThoughtsPolarityClassifierModel, self).__init__(args)
+    self.features = {
+        'sentences_id': tf.VarLenFeature(dtype=tf.int64),
+        'subjective': tf.FixedLenFeature([1], dtype=tf.int64),
+    }
+    self.feature_spec = self.features
+
+  def _get_input(self, pattern, name=None, num_epochs=None, shuffle=True):
+    """Read, parse and batch tf.Examples in multiple threads and push them onto
+       a queue."""
+    # Ignore the returned file names for now.
+    examples = tf.contrib.learn.io.read_batch_record_features(
+        file_pattern=pattern,
+        batch_size=self.batch_size,
+        features=self.feature_spec,
+        reader_num_threads=2, # one thread can't keep up with >1 GPUs
+        num_epochs=num_epochs,
+        randomize_input=shuffle,
+        name=name)
+
+    ids, mask = self._sparse_to_batch(examples['sentences_id'])
+    features = {
+        'sentences_id': ids,
+        'sentences_id_mask': mask,
+    }
+    targets = {
+        'subjective': examples['subjective'],
+    }
+    return features, targets
+
+  def get_predictions(self, features, targets, mode, params):
+    """Build and return the model."""
+
+    encode_input = features['sentences_id']
+    tf.summary.histogram('inputs/encode', encode_input)
+
+    if mode == tf.contrib.learn.ModeKeys.INFER:
+      # At inference time, we don't care about decoding again.
+      if not isinstance(encode_input, tf.Tensor):
+        encode_input, _ = self._sparse_to_batch(encode_input)
+
+    word_emb = tf.get_variable(
+        'word_embedding',
+        shape=[self.vocab_size, params['embedding_dim']],
+        initializer=self.uniform_initializer)
+    tf.summary.histogram('word_embedding', word_emb)
+
+    encode_emb = tf.nn.embedding_lookup(word_emb, encode_input)
+    encode_lengths = tf.to_int32(self._get_sequence_lengths(encode_input), name='length')
+    # Now encode a thought vector and feed it into the two decoders.
+    thought_vectors = self._setup_encoder(encode_emb, encode_lengths)
+
+    # Stack batch vertically.
+    num_units = self.params['encoder_dim']
+    thought_vectors = tf.reshape(thought_vectors, [-1, num_units])
+
+    # Logits.
+    logits = tf.contrib.layers.fully_connected(
+      inputs=thought_vectors,
+      num_outputs=2,
+      activation_fn=None,
+      weights_initializer=self.uniform_initializer)
+    tf.summary.histogram('logits', logits)
+    return {
+        'logits': logits,
+        'sentences_id_mask': features['sentences_id_mask'],
+    }
+
+  def get_loss(self, predictions, targets, mode, params):
+    if mode != tf.contrib.learn.ModeKeys.INFER:
+      targets = tf.reshape(targets['subjective'], [-1])
+      logits = predictions['logits']
+      print ('>targets', targets.get_shape())
+      losses = tf.nn.sparse_softmax_cross_entropy_with_logits(
+          labels=targets, logits=logits)
+      batch_loss = tf.reduce_sum(losses)
+      tf.summary.scalar('losses/batch', batch_loss)
+      return batch_loss
+    else:
+      raise Exception("Wrong mode {}".format(mode))

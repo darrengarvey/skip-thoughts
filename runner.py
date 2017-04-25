@@ -9,6 +9,7 @@ import tensorflow as tf
 # Local imports
 import util
 from models import SkipThoughtsModel
+from models import SkipThoughtsPolarityClassifierModel
 
 """
 This is the process that runs the master, ps and worker nodes in a
@@ -38,12 +39,19 @@ def parse_args(args):
   parser.add_argument('--uniform-init-scale', default=0.1, type=float,
                       help='Scale to use for random_uniform_initializer '
                            '(default=%(default)s)')
+  parser.add_argument('-m', '--model', default='skip',
+                      choices=['skip', 'subjectivity'],
+                      help='Pick a model')
   return util.parse_args(parser, args)
 
 
 def main(args):
   args, run_config = parse_args(args)
-  model = SkipThoughtsModel(args)
+  model = None
+  if args.model == 'skip':
+    model = SkipThoughtsModel(args)
+  else:
+    model = SkipThoughtsPolarityClassifierModel(args)
   util.run(args, run_config, model)
   #serving_input_fn = build_parsing_serving_input_receiver_fn(
   #    model.get_serving_input())

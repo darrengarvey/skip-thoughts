@@ -158,7 +158,7 @@ def _run(args, run_config, model):
   # This is pretty ugly, but we need to set the schedule to this magic
   # string as the default learn_runner figures out is wrong. It's not
   # so easy to fix there either. Meh...
-  schedule = 'local_run' if args.environment == 'local' else None
+  schedule = None
   learn_runner.run(_create_experiment(args, model),
                    run_config=run_config,
                    schedule=schedule)

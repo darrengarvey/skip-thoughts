@@ -44,14 +44,14 @@ def get_arg_parser():
                       help='Optimizer to use (default=%(default)s)')
   parser.add_argument('--jit', action='store_true', default=False,
                       help='Use XLA to compile the graph (experimental)')
-  parser.add_argument('--eval-steps', type=int, required=True,
+  parser.add_argument('--eval-steps', type=int,
                       help='Number of steps to run when evaluating')
   parser.add_argument('--min_eval_frequency', default=1000, type=int,
                       help='Min number of steps between eval steps. '
                      'Evaluation runs on the CPU (if you use train.py) '
                      'and the GPU can get starved if the CPU is busy '
                      'running evaluation')
-  parser.add_argument('--train-steps', type=int, required=True,
+  parser.add_argument('--train-steps', type=int,
                       help='Number of steps to train for')
   parser.add_argument('--clip-gradients', default=5.0, type=float,
                       help='Clip gradients over this value (default=%(default)s)')
@@ -108,6 +108,14 @@ def parse_args(parser, args):
   return args, run_config
 
 
+def read_vocab(vocab):
+  with open(vocab, 'r') as f:
+    return {
+        l.strip(): i
+        for i,l in enumerate(f.readlines())
+    }
+
+
 def _create_experiment(args, model):
   """Create a tf.learn.Estimator.
 
@@ -152,6 +160,8 @@ class Model(object):
   def __init__(self, params):
     self.params = params if isinstance(params, dict) else vars(params)
     self.__dict__.update(self.params)
+    self._estimator = None
+
 
   def get_training_input(self):
     """Get input for training runs.
@@ -214,20 +224,20 @@ class Model(object):
         summaries=optimizers.OPTIMIZER_SUMMARIES,
         optimizer=self.optimizer)
 
-  def get_model(self, features, targets, mode, params):
+  def get_model(self, features, labels, mode, params):
     """This is the standard model function that needs to be passed to a
        tf.contrib.learn.Estimator(). See:
   
        https://www.tensorflow.org/extend/estimators#constructing_the_model_fn"""
-    predictions = self.get_predictions(features, targets, mode, params)
+    predictions = self.get_predictions(features, labels, mode, params)
     if mode == tf.contrib.learn.ModeKeys.INFER:
       loss = None
       train_op = None
       eval_metric_ops = None
     else:
-      loss = self.get_loss(predictions, targets, mode, params)
+      loss = self.get_loss(predictions, labels, mode, params)
       train_op = self.get_train_op(loss, params)
-      eval_metric_ops = self.get_eval_metrics(features, predictions, targets,
+      eval_metric_ops = self.get_eval_metrics(features, predictions, labels,
                                               mode, params)
     return tf.contrib.learn.ModelFnOps(mode, predictions, loss, train_op,
                                        eval_metric_ops)
@@ -235,7 +245,11 @@ class Model(object):
   def get_estimator(self):
     """By default, we used the default estimator, but users can override
        this if they like."""
-    return tf.contrib.learn.Estimator(model_fn=self.get_model,
-                                      model_dir=self.params['logdir'],
-                                      params=self.params)
+    if not self._estimator:
+      def model_fn(features, labels, mode, params):
+        return self.get_model(features, labels, mode, params)
+      self._estimator = tf.contrib.learn.Estimator(
+          model_fn=model_fn, model_dir=self.params['logdir'],
+          params=self.params)
+    return self._estimator
 

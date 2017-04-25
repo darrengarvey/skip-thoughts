@@ -38,13 +38,20 @@ class SkipThoughtsModel(util.Model):
     self.feature_spec = tf.contrib.layers.create_feature_spec_for_parsing(self.features),
     # ... or do it the easy way:
     self.features = {
-        "encode": tf.VarLenFeature(dtype=tf.int64),
-        "decode_pre": tf.VarLenFeature(dtype=tf.int64),
-        "decode_post": tf.VarLenFeature(dtype=tf.int64),
+        'encode': tf.VarLenFeature(dtype=tf.int64),
+        'decode_pre': tf.VarLenFeature(dtype=tf.int64),
+        'decode_post': tf.VarLenFeature(dtype=tf.int64),
     }
     self.feature_spec = self.features
 
-  def _get_input(self, pattern, name=None):
+  def _sparse_to_batch(self, sparse):
+    print ('shapes', sparse.dense_shape)
+    ids = tf.sparse_tensor_to_dense(sparse)
+    mask = tf.sparse_to_dense(sparse.indices, sparse.dense_shape,
+                              tf.ones_like(sparse.values, dtype=tf.int32))
+    return ids, mask
+
+  def _get_input(self, pattern, name=None, num_epochs=None, shuffle=True):
     """Read, parse and batch tf.Examples in multiple threads and push them onto
        a queue."""
     # Ignore the returned file names for now.
@@ -53,20 +60,15 @@ class SkipThoughtsModel(util.Model):
         batch_size=self.batch_size,
         features=self.feature_spec,
         reader_num_threads=2, # one thread can't keep up with >1 GPUs
+        num_epochs=num_epochs,
+        randomize_input=shuffle,
         name=name)
 
-    def _sparse_to_batch(sparse):
-      ids = tf.sparse_tensor_to_dense(sparse)
-      mask = tf.sparse_to_dense(sparse.indices, sparse.dense_shape,
-                                tf.ones_like(sparse.values, dtype=tf.int32))
-      return ids, mask
-    ids, mask = _sparse_to_batch(examples['encode'])
     features = {
-        'encode': ids,
-        'encode_mask': mask,
+        'encode': tf.sparse_tensor_to_dense(examples['encode']),
     }
-    ids1, mask1 = _sparse_to_batch(examples['decode_pre'])
-    ids2, mask2 = _sparse_to_batch(examples['decode_post'])
+    ids1, mask1 = self._sparse_to_batch(examples['decode_pre'])
+    ids2, mask2 = self._sparse_to_batch(examples['decode_post'])
     targets = {
         'decode_pre': ids1,
         'decode_pre_mask': mask1,
@@ -81,6 +83,10 @@ class SkipThoughtsModel(util.Model):
   def get_eval_input(self):
     return self._get_input(self.validation_input_pattern, 'eval_input')
 
+  def get_predict_input(self):
+    return self._get_input(self.predict_input_pattern, 'predict_input',
+                           num_epochs=1, shuffle=False)
+
   def _get_sequence_lengths(self, tensor):
     if isinstance(tensor, tf.SparseTensor):
       _, _, counts = tf.unique_with_counts(tensor.indices[:,0])
@@ -90,6 +96,23 @@ class SkipThoughtsModel(util.Model):
 
   def get_predictions(self, features, targets, mode, params):
     """Build and return the model."""
+
+    if mode == tf.contrib.learn.ModeKeys.INFER:
+      # At inference time, we don't care about decoding again.
+      encode_input = features['encode']
+      if not isinstance(encode_input, tf.Tensor):
+        encode_input, _ = self._sparse_to_batch(encode_input)
+      word_emb = tf.get_variable(
+          'word_embedding',
+          shape=[self.vocab_size, params['embedding_dim']],
+          initializer=self.uniform_initializer)
+      encode_emb = tf.nn.embedding_lookup(word_emb, encode_input)
+      encode_lengths = tf.to_int32(self._get_sequence_lengths(encode_input), name='length')
+      thought_vectors = self._setup_encoder(encode_emb, encode_lengths)
+      return {
+          'thought_vectors': thought_vectors,
+      }
+
     encode_input = features['encode']
     decode_pre_input = targets['decode_pre']
     decode_post_input = targets['decode_post']
@@ -107,22 +130,21 @@ class SkipThoughtsModel(util.Model):
     encode_emb = tf.nn.embedding_lookup(word_emb, encode_input)
     encode_lengths = tf.to_int32(self._get_sequence_lengths(encode_input), name='length')
     # Now encode a thought vector and feed it into the two decoders.
-    thought_vector = self._setup_encoder(encode_emb, encode_lengths)
-
+    thought_vectors = self._setup_encoder(encode_emb, encode_lengths)
     # When training, feed the thought vector into two separate
     # networks: predicting the previous and next sentences
     decode_pre_input = tf.nn.embedding_lookup(word_emb, decode_pre_input)
     decode_pre_mask = targets['decode_pre_mask']
     decode_pre_lengths = self._get_sequence_lengths(decode_pre_mask)
     decode_pre = self._setup_decoder(
-        'decode_pre', thought_vector,
+        'decode_pre', thought_vectors,
         decode_pre_input, decode_pre_lengths,
         reuse=False)
     decode_post_input = tf.nn.embedding_lookup(word_emb, decode_post_input)
     decode_post_mask = targets['decode_post_mask']
     decode_post_lengths = self._get_sequence_lengths(decode_post_mask)
     decode_post = self._setup_decoder(
-        'decode_post', thought_vector,
+        'decode_post', thought_vectors,
         decode_post_input, decode_post_lengths,
         reuse=True)
     return {

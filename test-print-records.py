@@ -14,11 +14,12 @@ def read_vocab(vocab):
     with open(vocab, 'r') as f:
         return [l.strip() for l in f.readlines()]
 
-def get_input(pattern, features):
+def get_input(pattern, features, shuffle=False):
     examples = tf.contrib.learn.io.read_keyed_batch_features(
         pattern,
-        batch_size=2,
+        batch_size=1,
         features=features,
+        randomize_input=shuffle,
         reader=tf.TFRecordReader)
     return examples
 
@@ -34,7 +35,8 @@ if tf_layers:
     decode_post = layers.sparse_column_with_integerized_feature(
         'decode_post', bucket_size=vocab_size)
     features = {
-        'encode': layers.embedding_column(encode, dimension=100),
+        'encode': encode,
+        'encode_emb': layers.embedding_column(encode, dimension=100),
         'decode_pre': layers.embedding_column(decode_pre, dimension=100),
         'decode_post': layers.embedding_column(decode_post, dimension=100),
     }
@@ -73,10 +75,7 @@ with tf.Session() as sess:
     # Start the queue runners.
     coord = tf.train.Coordinator()
     threads = tf.train.start_queue_runners(coord=coord)
-    while True:
-        files, examples = sess.run(i)
-        print ('files: {}'.format(', '.join(files)))
-        print_decode(examples, 'encode', vocab)
-        print_decode(examples, 'decode_pre', vocab)
-        print_decode(examples, 'decode_post', vocab)
-        sys.stdin.readline()
+    with open('sentences.txt', 'w') as f:
+        while True:
+            files, examples = sess.run(i)
+            f.write('{}\n'.format(decode_sentence(examples['encode'], vocab)))

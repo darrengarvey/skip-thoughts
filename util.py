@@ -97,14 +97,6 @@ def parse_args(parser, args):
   return args, run_config
 
 
-def read_vocab(vocab):
-  with open(vocab, 'r') as f:
-    return {
-        l.strip(): i
-        for i,l in enumerate(f.readlines())
-    }
-
-
 def _create_experiment(args, model):
   """Create a tf.learn.Estimator.
 

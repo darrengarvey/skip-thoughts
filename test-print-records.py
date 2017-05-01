@@ -3,16 +3,13 @@
 import sys
 import tensorflow as tf
 import tensorflow.contrib.layers as layers
+from vocab import Vocab
 
 
 # Whether to use tf.contrib.layers or not.
 tf_layers = False
 # Change this
-base_dir = '/data/software/machine-learning/tensorflow-models/skip_thoughts/preprocessed-news'
-
-def read_vocab(vocab):
-    with open(vocab, 'r') as f:
-        return [l.strip() for l in f.readlines()]
+base_dir = 'data/skip-thought-small-60'
 
 def get_input(pattern, features, shuffle=False):
     examples = tf.contrib.learn.io.read_keyed_batch_features(
@@ -24,7 +21,7 @@ def get_input(pattern, features, shuffle=False):
     return examples
 
 
-vocab = read_vocab(base_dir+'/vocab.txt')
+vocab = Vocab(base_dir+'/vocab.txt')
 vocab_size = len(vocab)
 
 if tf_layers:
@@ -50,14 +47,11 @@ else:
         "decode_pre": tf.VarLenFeature(dtype=tf.int64),
         "decode_post": tf.VarLenFeature(dtype=tf.int64),
     }
-i = get_input(base_dir+'/train-00000-of-00100', features)
+i = get_input(base_dir+'/validation-00000-of-00001', features)
 
 def decode_sentence(tensor, vocab):
     """Turn a list of ids into a string of words"""
-    words = []
-    for val in tensor.values:
-        words.append(vocab[val])
-    return ' '.join(words)
+    return ' '.join(vocab.decode(tensor.values))
 
 def get_sequence_lengths(tensor):
     # There's got to be a cleaner way to get the sequence lengths...

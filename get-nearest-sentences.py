@@ -12,6 +12,7 @@ from tensorflow.python.estimator.export.export_lib import build_parsing_serving_
 from tqdm import tqdm
 # Local imports
 import util
+from vocab import Vocab
 from models import SkipThoughtsModel
 from interactive import get_input
 
@@ -49,24 +50,15 @@ def parse_args(args):
 
 def get_user_input(vocab):
   def interactive_input_fn():
-    from nltk.tokenize import word_tokenize
-    unk = vocab.get('<unk>')
-    eos = vocab.get('<unk>')
     for line in get_input():
       line = line.lower().strip()
       if 0 == len(line):
         continue
       elif line in ['quit', 'exit']:
-        done = True
         import sys
         sys.exit(0)
-      words = word_tokenize(line)
-      ids = []
-      for word in words:
-        ids.append(vocab.get(word, unk))
-      ids.append(eos)
+      ids = vocab.encode(line)
       print ('got ids', ids)
-      done = True
       return {
           'encode': tf.constant([ids]),
       }
@@ -79,7 +71,7 @@ def read_sentences(args):
       
 def main(args):
   args, run_config = parse_args(args)
-  vocab = util.read_vocab(args.vocab)
+  vocab = Vocab(args.vocab)
   sentences = read_sentences(args)
   model = SkipThoughtsModel(args)
   #import pdb

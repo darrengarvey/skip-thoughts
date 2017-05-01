@@ -18,9 +18,9 @@ def get_input(prompt='> '):
     try:
         while True:
             text = input(prompt)
-            if text == "": break
             yield text
     except (KeyboardInterrupt, EOFError):
-        pass
+        print
+        raise StopIteration()
     # We need to add a newline after the prompt when exiting.
     print

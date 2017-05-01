@@ -92,19 +92,6 @@ def parse_args(parser, args):
         'index': args.task_index,
       }
     })
-  else:
-    print('Setting up for local training')
-    os.environ['TF_CONFIG'] = json.dumps({
-      'master': 'grpc://127.0.0.1:2222',
-      'cluster': {
-        'local': ['localhost:2222'],
-      },
-      'task': {
-        'index': 0,
-      }
-    })
-
-  run_config = RunConfig()
 
   run_config = RunConfig(model_dir=args.logdir)
   return args, run_config

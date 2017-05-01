@@ -48,7 +48,7 @@ def get_arg_parser():
                       help='Use XLA to compile the graph (experimental)')
   parser.add_argument('--eval-steps', type=int,
                       help='Number of steps to run when evaluating')
-  parser.add_argument('--min_eval_frequency', default=1000, type=int,
+  parser.add_argument('--min-eval-frequency', default=1000, type=int,
                       help='Min number of steps between eval steps. '
                      'Evaluation runs on the CPU (if you use train.py) '
                      'and the GPU can get starved if the CPU is busy '
@@ -61,7 +61,7 @@ def get_arg_parser():
                       help='Learning rate (default=%(default)s)')
   parser.add_argument('--learning-rate-decay-rate', default=0.5, type=float,
                       help='Learning rate decay control (default=%(default)s)')
-  parser.add_argument('--learning-rate-decay-steps', default=50000, type=int,
+  parser.add_argument('--learning-rate-decay-steps', default=30000, type=int,
                       help='How often to decay the learning rate '
                            '(default=%(default)s)')
   return parser

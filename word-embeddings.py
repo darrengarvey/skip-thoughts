@@ -99,13 +99,10 @@ class WordEmbeddings(object):
 
   def _restore_checkpoint(self):
     checkpoint = tf.train.latest_checkpoint(self.logdir)
-    meta_file = '.'.join([checkpoint, 'meta'])
-    print ('Loading embedding variable from checkpoint: {}'.format(meta_file))
-    self.meta_graph = tf.train.import_meta_graph(meta_file, clear_devices=True)
-    self.graph = tf.get_default_graph()
+    print ('Loading embedding variable from checkpoint: {}'.format(checkpoint))
     self.session = tf.Session()
-    self.meta_graph.restore(self.session, checkpoint)
-    self.embedding_var = self.graph.get_tensor_by_name(self.embedding_var_name)
+    self.embedding_var = tf.contrib.framework.load_variable(
+        checkpoint, self.embedding_var_name)
 
   def _save_word_embeddings(self):
     vocab_len = len(self.vocab)

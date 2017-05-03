@@ -35,15 +35,23 @@ def parse_args(args):
   parser.add_argument('-k', '--search-k', default=-1, type=int,
                       help='Number of bins to search. Larger k is slower but '
                            'more precise. (default=%(default)s)')
-  parser.add_argument('--vocab', required=True, type=str,
-                      help='Path to the vocab file used to encode the input')
+  parser.add_argument('--vocab', default='vocab.txt', type=str,
+                      help='Path to the vocab file used to encode the input '
+                           '(default=<logdir>/%(default)s)')
   return parser.parse_args(args)
 
 
 class WordEmbeddings(object):
   def __init__(self, args):
     self.__dict__.update(vars(parse_args(args)))
-    self.vocab = Vocab(self.vocab)
+    if '/' in self.vocab:
+      # Unfortunately this won't work if the user just passes in a file in
+      # the current directory, but in most cases this logic means the user
+      # won't have to pass in vocab most of the time.
+      vocab_dir = self.vocab
+    else:
+      vocab_dir = os.path.join(self.logdir, self.vocab)
+    self.vocab = Vocab(vocab_dir)
     self.embedding_file = os.path.join(self.logdir, self.embedding_filename)
     self._restore_checkpoint()
     self.index = AnnoyIndex(self.embedding_dim)

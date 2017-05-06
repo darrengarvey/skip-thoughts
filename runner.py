@@ -1,4 +1,12 @@
 #!/usr/bin/env python
+"""
+This is the process that runs the master, ps and worker nodes in a
+distributed setting, or the process that runs training and evaluation
+in a local setup.
+
+If you don't want distributed running or tensorboard then run this
+directly.
+"""
 
 import argparse
 import json
@@ -10,36 +18,33 @@ import tensorflow as tf
 import util
 from models import SkipThoughtsModel
 from models import SkipThoughtsPolarityClassifierModel
-
-"""
-This is the process that runs the master, ps and worker nodes in a
-distributed setting, or the process that runs everything in a local setup.
-
-If you don't care about tensorboard or just want to KISS, then run this
-directly.
-"""
+from interactive import get_input
 
 def parse_args(args):
-  parser = util.get_arg_parser()
+  parser = util.get_arg_parser(__doc__)
   # Add additional command line stuff here...
-  parser.add_argument('-i', '--input-pattern', required=True,
+  group = parser.add_argument_group('Language model arguments')
+  group.add_argument('-i', '--input-pattern', required=True,
                       help='Location to read input data from')
-  parser.add_argument('-v', '--validation-input-pattern', required=True,
+  group.add_argument('--pretrained-encoder', type=str,
+                      help='Location of frozen graph for a pretrained encoder '
+                           'that can output a thought_vectors tensor')
+  group.add_argument('-v', '--validation-input-pattern', required=True,
                       help='Location to read validation input data from')
-  parser.add_argument('--bidirectional', action='store_true', default=False,
+  group.add_argument('--bidirectional', action='store_true', default=False,
                       help='Use a bidiredctional RNN')
-  parser.add_argument('--embedding-dim', default=620, type=int,
+  group.add_argument('--embedding-dim', default=620, type=int,
                       help='Word embedding dimension (default=%(default)s)')
-  parser.add_argument('--encoder-dim', default=2400, type=int,
+  group.add_argument('--encoder-dim', default=2400, type=int,
                       help='Number of units in the RNNCell (default=%(default)s)')
-  parser.add_argument('--vocab', required=True, type=str,
+  group.add_argument('--vocab', required=True, type=str,
                       help='Path to the vocab file used to encode the input')
-  parser.add_argument('--batch-size', default=128, type=int,
+  group.add_argument('--batch-size', default=128, type=int,
                       help='Batch size (default=%(default)s)')
-  parser.add_argument('--uniform-init-scale', default=0.1, type=float,
+  group.add_argument('--uniform-init-scale', default=0.1, type=float,
                       help='Scale to use for random_uniform_initializer '
                            '(default=%(default)s)')
-  parser.add_argument('-m', '--model', default='skip',
+  group.add_argument('-m', '--model', default='skip',
                       choices=['skip', 'subjectivity'],
                       help='Pick a model')
   return util.parse_args(parser, args)

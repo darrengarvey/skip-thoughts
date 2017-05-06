@@ -17,53 +17,58 @@ have to change.
 Also makes working in local / distributed uniform.
 """
 
-def get_arg_parser():
-  parser = argparse.ArgumentParser(description='Start a distributed job')
+def get_arg_parser(description='Start a distributed job'):
+  parser = argparse.ArgumentParser(description=description)
   parser.add_argument('--debug', default=False, action="store_true",
                       help='Turn on debug logging')
-  ###################################################################
-  # Distributed running arguments
-  parser.add_argument('--environment', default='local',
-                      choices=['cloud', 'local'],
-                      metavar=['cloud', 'local'],
-                      help='Whether to run locally or in a cloud setting.')
-  parser.add_argument('-t', '--task-index', default=0, type=int,
-                      help='Worker task index. Task index=0 is the master'
-                           'worker, so does initialisation')
-  parser.add_argument('--master', help='host of the master')
-  parser.add_argument('--task-name', default='none',
-                      choices=['master', 'worker', 'ps', 'none'],
-                      metavar=['master', 'worker', 'ps', 'none'],
-                      help='The job type')
-  parser.add_argument('--ps-hosts', default='',
-                      help='Comma-separated list of hostname:port pairs')
-  parser.add_argument('--worker-hosts', default='',
-                      help='Comma-separated list of hostname:port pairs')
-  ###################################################################
   parser.add_argument('--logdir', required=True,
                       help='Location to store checkpoint / log data')
+  ###################################################################
+  # Distributed running arguments
+  group = parser.add_argument_group('Distributed runtime arguments (optional)')
+  group.add_argument('--environment', default='local',
+                      choices=['cloud', 'local'],
+                      help='Whether to run locally or in a cloud setting '
+                           '(default=%(default)s)')
+  group.add_argument('-t', '--task-index', default=0, type=int,
+                      help='Worker task index. Task index=0 is the master '
+                           'worker, and does initialisation and runs model '
+                           'evaluation')
+  group.add_argument('--master', help='host of the master')
+  group.add_argument('--task-name', default='none',
+                      choices=['master', 'worker', 'ps', 'none'],
+                      help='The job type')
+  group.add_argument('--ps-hosts', default='',
+                      help='Comma-separated list of hostname:port pairs')
+  group.add_argument('--worker-hosts', default='',
+                      help='Comma-separated list of hostname:port pairs')
+  ###################################################################
   parser.add_argument('--optimizer', default='Adam', type=str,
                       help='Optimizer to use (default=%(default)s)')
   parser.add_argument('--jit', action='store_true', default=False,
                       help='Use XLA to compile the graph (experimental)')
-  parser.add_argument('--eval-steps', type=int,
+  ###################################################################
+  # Configuration for training-time
+  group = parser.add_argument_group('Standard training arguments')
+  group.add_argument('--eval-steps', type=int,
                       help='Number of steps to run when evaluating')
-  parser.add_argument('--min-eval-frequency', default=1000, type=int,
+  group.add_argument('--min-eval-frequency', default=1000, type=int,
                       help='Min number of steps between eval steps. '
                      'Evaluation runs on the CPU (if you use train.py) '
                      'and the GPU can get starved if the CPU is busy '
                      'running evaluation')
-  parser.add_argument('--train-steps', type=int,
+  group.add_argument('--train-steps', type=int,
                       help='Number of steps to train for')
-  parser.add_argument('--clip-gradients', default=5.0, type=float,
+  group.add_argument('--clip-gradients', default=5.0, type=float,
                       help='Clip gradients over this value (default=%(default)s)')
-  parser.add_argument('--learning-rate', default=0.002, type=float,
+  group.add_argument('--learning-rate', default=0.002, type=float,
                       help='Learning rate (default=%(default)s)')
-  parser.add_argument('--learning-rate-decay-rate', default=0.5, type=float,
+  group.add_argument('--learning-rate-decay-rate', default=0.5, type=float,
                       help='Learning rate decay control (default=%(default)s)')
-  parser.add_argument('--learning-rate-decay-steps', default=30000, type=int,
+  group.add_argument('--learning-rate-decay-steps', default=30000, type=int,
                       help='How often to decay the learning rate '
                            '(default=%(default)s)')
+  ###################################################################
   return parser
 
 

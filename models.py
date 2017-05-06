@@ -281,6 +281,36 @@ class SkipThoughtsPolarityClassifierModel(SkipThoughtsModel):
     }
     return features, targets
 
+  def _load_pretrained_encoder(self, encode_input):
+    print ('Using pretrained encoder from {}'.format(
+           self.pretrained_encoder))
+    with tf.gfile.FastGFile(self.pretrained_encoder, 'rb') as f:
+      graph = tf.GraphDef()
+      graph.ParseFromString(f.read())
+      thought_vectors = tf.import_graph_def(
+          graph, name='thought_vectorz',
+          input_map={'encoder_input': encode_input},
+          return_elements=['thought_vectors:0'])
+      print (thought_vectors)
+      return thought_vectors[0]
+
+  def _make_encoder(self, encode_input):
+    # Share the word embedding between encoder and decoder.
+    #word_emb = tf.contrib.layers.embed_sequence(
+    #    encode_input, self.vocab_size, self.embedding_dim
+    #    initializer=self.uniform_initializer)
+    word_emb = tf.get_variable(
+        'word_embedding',
+        shape=[self.vocab_size, self.embedding_dim],
+        initializer=self.uniform_initializer)
+    tf.summary.histogram('word_embedding', word_emb)
+
+    encode_emb = tf.nn.embedding_lookup(word_emb, encode_input)
+    encode_lengths = tf.to_int32(self._get_sequence_lengths(encode_input), name='length')
+    # Now encode a thought vector and feed it into the two decoders.
+    thought_vectors = self._setup_encoder(encode_emb, encode_lengths)
+    return thought_vectors
+
   def get_predictions(self, features, targets, mode, params):
     """Build and return the model."""
 
@@ -292,16 +322,10 @@ class SkipThoughtsPolarityClassifierModel(SkipThoughtsModel):
       if not isinstance(encode_input, tf.Tensor):
         encode_input, _ = self._sparse_to_batch(encode_input)
 
-    word_emb = tf.get_variable(
-        'word_embedding',
-        shape=[self.vocab_size, params['embedding_dim']],
-        initializer=self.uniform_initializer)
-    tf.summary.histogram('word_embedding', word_emb)
-
-    encode_emb = tf.nn.embedding_lookup(word_emb, encode_input)
-    encode_lengths = tf.to_int32(self._get_sequence_lengths(encode_input), name='length')
-    # Now encode a thought vector and feed it into the two decoders.
-    thought_vectors = self._setup_encoder(encode_emb, encode_lengths)
+    if self.pretrained_encoder:
+      thought_vectors = self._load_pretrained_encoder(encode_input)
+    else:
+      thought_vectors = self._make_encoder(encode_input)
 
     # Stack batch vertically.
     num_units = self.params['encoder_dim']

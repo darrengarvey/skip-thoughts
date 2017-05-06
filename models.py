@@ -102,9 +102,10 @@ class SkipThoughtsModel(util.Model):
   def get_predictions(self, features, targets, mode, params):
     """Build and return the model."""
 
+    encode_input = tf.identity(features['encode'], name='encoder_input')
+
     if mode == tf.contrib.learn.ModeKeys.INFER:
       # At inference time, we don't care about decoding again.
-      encode_input = features['encode']
       if not isinstance(encode_input, tf.Tensor):
         encode_input, _ = self._sparse_to_batch(encode_input)
       word_emb = tf.get_variable(
@@ -118,7 +119,6 @@ class SkipThoughtsModel(util.Model):
           'thought_vectors': thought_vectors,
       }
 
-    encode_input = features['encode']
     decode_pre_input = targets['decode_pre']
     decode_post_input = targets['decode_post']
     tf.summary.histogram('inputs/encode', encode_input)

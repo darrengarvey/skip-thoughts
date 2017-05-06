@@ -1,4 +1,6 @@
 #!/usr/bin/env python
+# PYTHON_ARGCOMPLETE_OK
+
 """
 This is the process that runs the master, ps and worker nodes in a
 distributed setting, or the process that runs training and evaluation

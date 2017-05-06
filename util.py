@@ -75,6 +75,14 @@ def get_arg_parser(description='Start a distributed job'):
 def parse_args(parser, args):
   """Parse args and set up logging and TF_CONFIG for distributed
      training."""
+  try:
+    import argcomplete
+    argcomplete.autocomplete(parser)
+  except:
+    print ('Install argcomplete for a better time')
+    # You should install argcomplete to get autocompletion. Not having
+    # it isn't an error, just a bit silly.
+    pass
   args = parser.parse_args(args)
   # Turn up logging to get a better idea what's going on.
   if args.debug:
